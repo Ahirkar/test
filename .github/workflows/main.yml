@@ -1,5 +1,6 @@
 name: test 
-on: [push, Workflow-Dispatch]
+on: push
+workflow_dispatch: 
 jobs:
   build:
     continue-on-error: true

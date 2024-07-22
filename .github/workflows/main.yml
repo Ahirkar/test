@@ -1,6 +1,7 @@
 name: test 
-on: push
-workflow_dispatch: 
+on:
+ push:
+ workflow_dispatch: 
 jobs:
   build:
     continue-on-error: true

@@ -1,0 +1,65 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - development
+  pull_request:
+    branches:
+      - main
+      - development
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      duplo_token: ${{ secrets.DUPLO_TOKEN }}
+      TENANT_NAME: ${{ secrets.TENANT_NAME }}
+      SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
+      duplo_host: ${{ secrets.duplo_host }}
+    strategy:
+      matrix:
+        dotnet_version:
+          - '5.0.x'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Determine Environment
+        id: branch_check
+        run: |
+          echo "Running on branch ${{ github.ref }}"
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "::set-output name=env_name::dev"
+          elif [ "${{ github.ref }}" = "refs/heads/development" ]; then
+            echo "::set-output name=env_name::test"
+          else
+            echo "::set-output name=env_name::unknown"
+          }
+
+      - name: Build and Test
+        run: |
+          cd EmployeeMasterWebAPI/
+          dotnet --version
+          dotnet restore
+          dotnet build
+          dotnet test
+
+      - name: Docker Build and Push
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/${{ secrets.SERVICE_NAME }}:${{ needs.branch_check.outputs.env_name }}-${{ github.sha }}
+
+      - name: Deploy Service
+        uses: duplocloud/ghactions-service-update@master
+        with:
+          tenant: ${{ secrets.TENANT_NAME }}
+          services: |
+            [
+              { "Name": "${{ secrets.SERVICE_NAME }}", "Image": "${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/${{ secrets.SERVICE_NAME }}:${{ needs.branch_check.outputs.env_name }}-${{ github.sha }}" }
+            ]

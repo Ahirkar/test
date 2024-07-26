@@ -1,0 +1,76 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      APP: "Etech_EmployeeMasterService"
+      GITREPO: "JFLIT"
+      CACHE: "dotnet"
+      DUPLO_HOST: "https://jfl-dev.duplocloud.net"
+      GIT_TAG: ${{ steps.get_git_tag.outputs.tag }}
+      DUPLO_SERVICE_NAME: "Etech-employeeservice"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Git
+        id: get_git_tag
+        run: |
+          echo "tag=$(git rev-parse --short=10 HEAD)" >> $GITHUB_ENV
+
+      - name: Cleanup
+        run: |
+          rm -rf ${{ github.workspace }}/${{ env.APP }}
+
+      - name: Build
+        run: |
+          docker run --rm \
+            -v ${{ env.CACHE }}:${{ github.workspace }}/cache \
+            -w ${{ github.workspace }}/${{ env.APP }} \
+            dotnet-agent:${{ env.buildmachine_tag }} \
+            sh -c "cd EmployeeMasterWebAPI/ && dotnet --version && dotnet restore && dotnet build"
+
+      - name: Dotnet Publish
+        run: |
+          docker run --rm \
+            -v ${{ env.CACHE }}:${{ github.workspace }}/cache \
+            -w ${{ github.workspace }}/${{ env.APP }} \
+            dotnet-agent:${{ env.buildmachine_tag }} \
+            sh -c "cd EmployeeMasterWebAPI/ && dotnet --version && dotnet test && dotnet publish -c Release -o ./publish"
+
+      - name: Build Docker image and push
+        run: |
+          wget https://raw.githubusercontent.com/duplocloud/demo-npm-service/master/.circleci/duplo_utils.sh
+          chmod +x duplo_utils.sh
+          . ./duplo_utils.sh
+          with_aws > tmp.txt
+          grep -i aws tmp.txt > tmp1.txt
+          . ./tmp1.txt
+          eval $(aws ecr get-login --no-include-email --region ap-south-1 | sed 's;https://;;g')
+          docker build --tag 481716204214.dkr.ecr.ap-south-1.amazonaws.com/etechemployeeservice:${{ inputs.docker_tag }}${{ env.RELEASE_DATE }} --no-cache --pull -f Dockerfile .
+          docker push 481716204214.dkr.ecr.ap-south-1.amazonaws.com/etechemployeeservice:${{ inputs.docker_tag }}${{ env.RELEASE_DATE }}
+          docker rmi 481716204214.dkr.ecr.ap-south-1.amazonaws.com/etechemployeeservice:${{ inputs.docker_tag }}${{ env.RELEASE_DATE }}
+
+      - name: Deploy
+        run: |
+          . ./duplo_utils.sh
+          with_aws > tmp.txt
+          grep -i aws tmp.txt > tmp1.txt
+          . ./tmp1.txt
+          update_service_api $(get_tenant_id ${{ inputs.tenant }}) "481716204214.dkr.ecr.ap-south-1.amazonaws.com/etechemployeeservice:${{ inputs.docker_tag }}${{ env.RELEASE_DATE }}"
+          
+    outputs:
+      tag:
+        description: 'Git commit short tag'
+        value: ${{ steps.get_git_tag.outputs.tag }}
